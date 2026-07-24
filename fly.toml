@@ -1,14 +1,14 @@
-    app = "cossyreign-developed-bot"
-    primary_region = "jnb"
+app = "cossyreign-developed-bot"
+primary_region = "jnb"
 
-    [build]
+[build]
 
-    [[mounts]]
-      source = "sessions"
-      destination = "/app/sessions"
+[[mounts]]
+  source = "sessions"
+  destination = "/app/sessions"
 
-    [env]
-      NODE_ENV = "production"
+[env]
+  NODE_ENV = "production"
 
-    [processes]
-      app = "node connect.js" 
+[processes]
+  app = "node connect.js" 
