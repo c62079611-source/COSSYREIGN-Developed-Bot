@@ -1,8 +1,17 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys')
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, downloadContentFromMessage } = require('@whiskeysockets/baileys')
 const pino = require('pino')
 const chalk = require('chalk')
 const fs = require('fs')
 const path = require('path')
+
+const commands = new Map()
+
+// Load all commands from commands folder
+const commandFiles = fs.readdirSync('./commands').filter(file => file.endsWith('.js'))
+for(const file of commandFiles) {
+    const command = require(`./commands/${file}`)
+    commands.set(command.name, command)
+}
 
 async function startCossy() {
     const { state, saveCreds } = await useMultiFileAuthState('./sessions')
@@ -20,7 +29,7 @@ async function startCossy() {
     
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0]
-        if (!msg.message) return
+        if (!msg.message || msg.key.fromMe) return
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || ''
         const from = msg.key.remoteJid
         const sender = msg.key.participant || from
@@ -29,23 +38,21 @@ async function startCossy() {
         const isOwner = owners.includes(sender.split('@')[0])
 
         if (!text.startsWith(prefix)) return
-        const command = text.slice(prefix.length).trim().toLowerCase()
+        const args = text.slice(prefix.length).trim().split(/ +/)
+        const commandName = args.shift().toLowerCase()
 
-        // OWNER ONLY COMMANDS
-        if(command === 'ping' && isOwner) {
-            await sock.sendMessage(from, { text: `👑 COSSY REIGN is ALIVE\nSpeed: ${Date.now() - msg.messageTimestamp * 1000}ms` })
-        }
-        
-        if(command === 'restart' && isOwner) {
-            await sock.sendMessage(from, { text: '♻️ Restarting COSSY REIGN...' })
-            process.exit(1)
+        const command = commands.get(commandName) || [...commands.values()].find(cmd => cmd.command?.includes(commandName))
+        if(!command) return
+
+        if(command.ownerOnly &&!isOwner) {
+            return sock.sendMessage(from, { text: '❌ Owner Only Command' })
         }
 
-        if(command === 'menu') {
-            await sock.sendMessage(from, { 
-                image: { url: 'https://ibb.co/twnsPqd2' },
-                caption: `👑 *COSSY REIGN V7.0*\n\n*OWNER:* ${owners.join(', ')}\n*PREFIX:* ${prefix}\n\n*COMMANDS:*\n.ping - Check bot\n.restart - Restart bot\n.menu - This menu\n\nPowered by COSSY`
-            })
+        try {
+            await command.execute(sock, msg, args, isOwner)
+        } catch(e) {
+            console.log(chalk.red(e))
+            await sock.sendMessage(from, { text: '❌ Error: ' + e.message })
         }
     })
 
