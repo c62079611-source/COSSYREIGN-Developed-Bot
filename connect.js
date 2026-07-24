@@ -16,7 +16,7 @@ for(const file of commandFiles) {
 async function startCossy() {
     const { state, saveCreds } = await useMultiFileAuthState('./sessions')
     const { version } = await fetchLatestBaileysVersion()
-    
+
     const sock = makeWASocket({
         version,
         auth: state,
@@ -26,7 +26,7 @@ async function startCossy() {
     })
 
     sock.ev.on('creds.update', saveCreds)
-    
+
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0]
         if (!msg.message || msg.key.fromMe) return
@@ -55,6 +55,45 @@ async function startCossy() {
             await sock.sendMessage(from, { text: '❌ Error: ' + e.message })
         }
     })
+
+    // ===== AUTO WELCOME + GOODBYE START =====
+    sock.ev.on('group-participants.update', async (update) => {
+        try {
+            const groupMetadata = await sock.groupMetadata(update.id)
+            const groupName = groupMetadata.subject
+
+            // WELCOME
+            if(update.action === 'add') {
+                for(const participant of update.participants) {
+                    const user = participant.split('@')[0]
+                    const welcomeMsg = `🎁 *WELCOME TO ${groupName.toUpperCase()}* 🎁\n\nHey @${user}, you're finally here! \n\nRead the description, be cool and enjoy ❤️\n\n- COSSY REIGN BOT`
+
+                    await sock.sendMessage(update.id, {
+                        image: { url: 'https://i.ibb.co/V3LkR5k/welcome-gift.png' }, // change this
+                        caption: welcomeMsg,
+                        mentions: [participant]
+                    })
+                }
+            }
+
+            // GOODBYE
+            if(update.action === 'remove' || update.action === 'leave') {
+                for(const participant of update.participants) {
+                    const user = participant.split('@')[0]
+                    const byeMsg = `👋 *@${user} left ${groupName}*\n\nThanks for being part of us. Come back anytime ❤️\n\n- COSSY REIGN BOT`
+
+                    await sock.sendMessage(update.id, {
+                        image: { url: 'https://i.ibb.co/0XJ1p4v/goodbye.png' }, // change this
+                        caption: byeMsg,
+                        mentions: [participant]
+                    })
+                }
+            }
+        } catch(e) {
+            console.log(chalk.red('Welcome/Goodbye Error:', e))
+        }
+    })
+    // ===== AUTO WELCOME + GOODBYE END =====
 
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect } = update
