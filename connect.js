@@ -22,7 +22,7 @@ async function startCossy() {
         auth: state,
         logger: pino({ level: 'silent' }),
         browser: ['COSSY REIGN', 'Chrome', '7.0'],
-        printQRInTerminal: false
+        printQRInTerminal: true // set to false after first scan
     })
 
     sock.ev.on('creds.update', saveCreds)
@@ -34,7 +34,7 @@ async function startCossy() {
         const from = msg.key.remoteJid
         const sender = msg.key.participant || from
         const prefix = process.env.PREFIX || '.'
-        const owners = process.env.OWNER.split(',')
+        const owners = process.env.OWNER ? process.env.OWNER.split(',') : []
         const isOwner = owners.includes(sender.split('@')[0])
 
         if (!text.startsWith(prefix)) return
@@ -44,7 +44,7 @@ async function startCossy() {
         const command = commands.get(commandName) || [...commands.values()].find(cmd => cmd.command?.includes(commandName))
         if(!command) return
 
-        if(command.ownerOnly &&!isOwner) {
+        if(command.ownerOnly && !isOwner) {
             return sock.sendMessage(from, { text: '❌ Owner Only Command' })
         }
 
@@ -95,16 +95,24 @@ async function startCossy() {
     })
     // ===== AUTO WELCOME + GOODBYE END =====
 
+    // ===== AUTO RECONNECT FOR 24/7 =====
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect } = update
         if(connection === 'open') {
             console.log(chalk.green.bold('✅ COSSY REIGN CONNECTED!'))
         }
         if(connection === 'close') {
-            const shouldReconnect = (lastDisconnect.error)?.output?.statusCode!== DisconnectReason.loggedOut
-            if(shouldReconnect) startCossy()
+            const statusCode = lastDisconnect.error?.output?.statusCode
+            const shouldReconnect = statusCode !== DisconnectReason.loggedOut
+            console.log(chalk.yellow(`Connection closed. Reason: ${statusCode}. Reconnecting...`))
+            if(shouldReconnect) {
+                startCossy() // restart bot
+            } else {
+                console.log(chalk.red('Logged out. Please scan QR again'))
+            }
         }
     })
+    // ===== END RECONNECT =====
 }
 
 startCossy() 
