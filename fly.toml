@@ -5,14 +5,16 @@ primary_region = "jnb"
 
 [env]
   NODE_ENV = "production"
+  PREFIX = "."
 
-[http_service]
-  internal_port = 8080
-  force_https = true
-  auto_stop_machines = false
-  auto_start_machines = true
+[[mounts]]
+  source = "sessions"
+  destination = "/app/sessions"
 
 [[vm]]
   memory = "256mb"
   cpu_kind = "shared"
-  cpus = 1 
+  cpus = 1
+
+[processes]
+  app = "node connect.js" 
