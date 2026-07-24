@@ -1,0 +1,18 @@
+{
+  "name": "cossy-reign",
+  "version": "7.0.0",
+  "description": "COSSY REIGN V7.0 WhatsApp Bot",
+  "main": "connect.js",
+  "scripts": {
+    "start": "node connect.js",
+    "web": "node web.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.5",
+    "express": "^4.18.2",
+    "qrcode": "^1.5.3",
+    "pino": "^8.17.0",
+    "axios": "^1.6.2",
+    "chalk": "^4.1.2"
+  }
+} 
