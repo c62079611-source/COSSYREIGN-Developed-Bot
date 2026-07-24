@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>COSSY REIGN V7.0</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #000 url('https://ibb.co/twnsPqd2') no-repeat center center fixed;
+            background-size: cover;
+            color: #FFD700;
+            font-family: 'Georgia', serif;
+            text-align: center;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            backdrop-filter: brightness(0.5);
+        }
+        .box {
+            background: rgba(0,0,0,0.88);
+            border: 3px solid #FFD700;
+            border-radius: 30px;
+            padding: 40px;
+            box-shadow: 0 0 50px rgba(255, 215, 0, 0.6);
+            max-width: 480px;
+            animation: glow 2s infinite alternate;
+        }
+        @keyframes glow {
+            from { box-shadow: 0 0 30px rgba(255, 215, 0, 0.4); }
+            to { box-shadow: 0 0 60px rgba(255, 215, 0, 0.9); }
+        }
+        .logo {
+            width: 220px;
+            height: 220px;
+            border-radius: 50%;
+            border: 5px solid #FFD700;
+            box-shadow: 0 0 40px rgba(255, 215, 0, 0.9);
+            margin-bottom: 20px;
+        }
+        h1 { 
+            font-size: 2.8em; 
+            color: #FFD700; 
+            text-shadow: 0 0 25px #FFD700;
+            margin-bottom: 5px;
+        }
+        p { color: #ccc; margin-bottom: 20px; font-size: 14px; }
+        #qr { 
+            background: white; 
+            padding: 20px; 
+            border-radius: 20px; 
+            display: inline-block;
+            box-shadow: 0 0 25px rgba(255, 215, 0, 0.7);
+        }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <img src="https://ibb.co/twnsPqd2" class="logo" alt="COSSY REIGN">
+        <h1>👑 COSSY REIGN 👑</h1>
+        <p>V7.0 - The Reign Begins</p>
+        <div id="qr">Loading...</div>
+        <p style="margin-top:15px; font-size:12px;">Scan QR OR Use Pairing Code</p>
+    </div>
+
+    <script>
+        async function loadQR() {
+            const res = await fetch('/qr')
+            const data = await res.text()
+            document.getElementById('qr').innerHTML = data
+        }
+        loadQR()
+        setInterval(loadQR, 20000)
+    </script>
+</body>
+</html> 
