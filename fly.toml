@@ -1,0 +1,18 @@
+app = "cossyreign-developed-bot"
+primary_region = "jnb"
+
+[build]
+
+[env]
+  NODE_ENV = "production"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+
+[[vm]]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1 
