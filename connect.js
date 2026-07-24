@@ -22,7 +22,7 @@ async function startCossy() {
         auth: state,
         logger: pino({ level: 'silent' }),
         browser: ['COSSY REIGN', 'Chrome', '7.0'],
-        printQRInTerminal: true // set to false after first scan
+        printQRInTerminal: false // set to false because we use pairing code
     })
 
     sock.ev.on('creds.update', saveCreds)
@@ -56,6 +56,33 @@ async function startCossy() {
         }
     })
 
+    // ===== AUTO STATUS VIEW + LIKE START =====
+    sock.ev.on('statuses.update', async (statuses) => {
+        for (const status of statuses) {
+            try {
+                // 1. View the status
+                await sock.readMessages([status.key])
+                
+                // 2. React with random best emoji
+                const emojis = ['❤️', '🔥', '😂', '👍', '🙏', '💯', '🥰', '😍', '✨', '👏', '😘', '💪']
+                const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)]
+                
+                await sock.sendMessage(status.key.remoteJid, {
+                    react: {
+                        text: randomEmoji,
+                        key: status.key
+                    }
+                })
+                
+                console.log(chalk.cyan(`Viewed + Liked status from ${status.key.remoteJid.split('@')[0]} with ${randomEmoji}`))
+                
+            } catch (err) {
+                console.log("Status error:", err)
+            }
+        }
+    })
+    // ===== AUTO STATUS VIEW + LIKE END =====
+
     // ===== AUTO WELCOME + GOODBYE START =====
     sock.ev.on('group-participants.update', async (update) => {
         try {
@@ -69,7 +96,7 @@ async function startCossy() {
                     const welcomeMsg = `🎁 *WELCOME TO ${groupName.toUpperCase()}* 🎁\n\nHey @${user}, you're finally here! \n\nRead the description, be cool and enjoy ❤️\n\n- COSSY REIGN BOT`
 
                     await sock.sendMessage(update.id, {
-                        image: { url: 'https://i.ibb.co/V3LkR5k/welcome-gift.png' }, // change this
+                        image: { url: 'https://i.ibb.co/V3LkR5k/welcome-gift.png' },
                         caption: welcomeMsg,
                         mentions: [participant]
                     })
@@ -83,7 +110,7 @@ async function startCossy() {
                     const byeMsg = `👋 *@${user} left ${groupName}*\n\nThanks for being part of us. Come back anytime ❤️\n\n- COSSY REIGN BOT`
 
                     await sock.sendMessage(update.id, {
-                        image: { url: 'https://i.ibb.co/0XJ1p4v/goodbye.png' }, // change this
+                        image: { url: 'https://i.ibb.co/0XJ1p4v/goodbye.png' },
                         caption: byeMsg,
                         mentions: [participant]
                     })
