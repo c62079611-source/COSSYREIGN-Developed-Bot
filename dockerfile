@@ -1,4 +1,4 @@
-FROM node:20-slim
+FROM node:18-alpine
 
 WORKDIR /app
 
@@ -7,4 +7,4 @@ RUN npm install
 
 COPY..
 
-CMD ["node", "connect.js"] 
+CMD ["node", "connect.js"]
