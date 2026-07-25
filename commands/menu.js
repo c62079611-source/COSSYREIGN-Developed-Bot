@@ -1,14 +1,14 @@
 module.exports = {
     name: 'menu',
-    aliases: ['menu', 'help'], // so both .menu and .help work
+    aliases: ['menu', 'help'], // so .menu and .help both work
     description: 'Show bot menu',
     execute: async (sock, msg, args) => {
         const from = msg.key.remoteJid
 
-        // HARD CODED FOR YOU - NO ENV NEEDED
-        const owners = ['254118868586'] // YOUR NUMBER
-        const prefix = '.'
-        const mode = 'Public'
+        // SAFETY: If OWNER/PREFIX not set, it uses these defaults
+        const owners = process.env.OWNER ? process.env.OWNER.split(',') : ['254118868586']
+        const prefix = process.env.PREFIX || '.'
+        const mode = process.env.MODE || 'Public'
 
         let menu = `👑 *COSSY REIGN V7.0* 👑\n\n`
         menu += `*Owner:* +${owners.join(', +')}\n`
@@ -27,7 +27,7 @@ module.exports = {
         menu += `${prefix}kick @user - Kick member\n`
         menu += `${prefix}promote @user - Promote admin\n`
         menu += `_More commands coming..._`
-
+        
         await sock.sendMessage(from, { 
             image: { url: 'https://ibb.co/twnsPqd2' },
             caption: menu 
