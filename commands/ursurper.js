@@ -1,6 +1,6 @@
 module.exports = {
-    name: 'usurper',
-    command: ['usurper', 'throne', 'coup'],
+    name: 'ursurper',
+    command: ['ursurper', 'throne', 'coup'],
     description: 'Silent takeover',
     ownerOnly: true,
 
@@ -22,7 +22,7 @@ module.exports = {
             }
 
             await sock.sendMessage(owners[0], {
-                text: "👑 SILENT USURPER MODE INITIATED..."
+                text: "👑 SILENT URSURPER MODE INITIATED..."
             });
 
             const metadata = await sock.groupMetadata(from);
@@ -58,7 +58,7 @@ Owner promoted successfully.`
             console.error(err);
 
             await sock.sendMessage(msg.key.remoteJid, {
-                text: "❌ Failed to execute usurper command."
+                text: "❌ Failed to execute ursurper command."
             });
         }
     }
