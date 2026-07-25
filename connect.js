@@ -1,145 +1,119 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, downloadContentFromMessage } = require('@whiskeysockets/baileys')
-const pino = require('pino')
-const chalk = require('chalk')
-const fs = require('fs')
-const path = require('path')
+const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion, jidNormalizedUser } = require('@whiskeysockets/baileys');
+const { Boom } = require('@hapi/boom');
+const pino = require('pino');
+const fs = require('fs');
+const readline = require('readline');
 
-const commands = new Map()
+const SESSION_DIR = './sessions';
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+const question = (text) => new Promise((resolve) => rl.question(text, resolve));
 
-// Load all commands from commands folder
-const commandFiles = fs.readdirSync('./commands').filter(file => file.endsWith('.js'))
-for(const file of commandFiles) {
-    const command = require(`./commands/${file}`)
-    commands.set(command.name, command)
-}
+async function startBot() {
+    if (!fs.existsSync(SESSION_DIR)) fs.mkdirSync(SESSION_DIR);
+    const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
+    const { version } = await fetchLatestBaileysVersion();
 
-async function startCossy() {
-    const { state, saveCreds } = await useMultiFileAuthState('./sessions')
-    const { version } = await fetchLatestBaileysVersion()
+    let usePairingCode = false;
+    let userPhone = "";
+
+    if (!state.creds.registered) {
+        const choice = await question('\n🔰 COSSY REIGN LOGIN\n[1] QR Code\n[2] Pairing Code/Numericals\nChoose 1 or 2: ');
+
+        if (choice.trim() === '2') {
+            usePairingCode = true;
+            userPhone = await question('Enter your WhatsApp number with country code e.g +2547xxxxxxx: ');
+        } else {
+            console.log('QR Mode selected. Scan the QR below...');
+        }
+    } else {
+        console.log('Found saved session. Connecting...');
+    }
 
     const sock = makeWASocket({
         version,
         auth: state,
-        logger: pino({ level: 'silent' }),
-        browser: ['COSSY REIGN', 'Chrome', '7.0'],
-        printQRInTerminal: false // set to false because we use pairing code
-    })
+        printQRInTerminal:!usePairingCode,
+        logger: pino({ level: 'info' }),
+        browser: ['COSSY-REIGN', 'Chrome', '1.0.0']
+    });
 
-    sock.ev.on('creds.update', saveCreds)
+    sock.ev.on('creds.update', saveCreds);
 
-    sock.ev.on('messages.upsert', async (m) => {
-        const msg = m.messages[0]
-        if (!msg.message || msg.key.fromMe) return
-        const text = msg.message.conversation || msg.message.extendedTextMessage?.text || ''
-        const from = msg.key.remoteJid
-        const sender = msg.key.participant || from
-        const prefix = process.env.PREFIX || '.'
-        const owners = process.env.OWNER ? process.env.OWNER.split(',') : []
-        const isOwner = owners.includes(sender.split('@')[0])
+    if (usePairingCode &&!sock.authState.creds.registered) {
+        setTimeout(async () => {
+            const code = await sock.requestPairingCode(userPhone.replace(/[^0-9]/g, ''));
+            console.log(`\n🔢 YOUR PAIRING CODE: ${code}`);
+            console.log('Go to WhatsApp > Settings > Linked Devices > Link with phone number\n');
+        }, 3000);
+    }
 
-        if (!text.startsWith(prefix)) return
-        const args = text.slice(prefix.length).trim().split(/ +/)
-        const commandName = args.shift().toLowerCase()
-
-        const command = commands.get(commandName) || [...commands.values()].find(cmd => cmd.command?.includes(commandName))
-        if(!command) return
-
-        if(command.ownerOnly && !isOwner) {
-            return sock.sendMessage(from, { text: '❌ Owner Only Command' })
+    sock.ev.on('connection.update', async (update) => {
+        const { connection, lastDisconnect } = update;
+        if (connection === 'close') {
+            const code = lastDisconnect?.error?.output?.statusCode;
+            const shouldReconnect = code!== DisconnectReason.loggedOut;
+            console.log(`❌ Disconnected. Reason: ${code}. Reconnecting: ${shouldReconnect}`);
+            if (shouldReconnect) startBot();
+            else rl.close();
+        } else if (connection === 'open') {
+            console.log('✅ COSSY REIGN BOT IS ONLINE');
+            rl.close();
         }
+    });
 
-        try {
-            await command.execute(sock, msg, args, isOwner)
-        } catch(e) {
-            console.log(chalk.red(e))
-            await sock.sendMessage(from, { text: '❌ Error: ' + e.message })
-        }
-    })
-
-    // ===== AUTO STATUS VIEW + LIKE START =====
-    sock.ev.on('statuses.update', async (statuses) => {
-        for (const status of statuses) {
-            try {
-                // 1. View the status
-                await sock.readMessages([status.key])
-                
-                // 2. React with random best emoji
-                const emojis = ['❤️', '🔥', '😂', '👍', '🙏', '💯', '🥰', '😍', '✨', '👏', '😘', '💪']
-                const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)]
-                
-                await sock.sendMessage(status.key.remoteJid, {
-                    react: {
-                        text: randomEmoji,
-                        key: status.key
-                    }
-                })
-                
-                console.log(chalk.cyan(`Viewed + Liked status from ${status.key.remoteJid.split('@')[0]} with ${randomEmoji}`))
-                
-            } catch (err) {
-                console.log("Status error:", err)
-            }
-        }
-    })
-    // ===== AUTO STATUS VIEW + LIKE END =====
-
-    // ===== AUTO WELCOME + GOODBYE START =====
+    // ========== GROUP WELCOME + GOODBYE ==========
     sock.ev.on('group-participants.update', async (update) => {
+        const { id, participants, action } = update;
         try {
-            const groupMetadata = await sock.groupMetadata(update.id)
-            const groupName = groupMetadata.subject
+            const metadata = await sock.groupMetadata(id);
+            const groupName = metadata.subject;
 
-            // WELCOME
-            if(update.action === 'add') {
-                for(const participant of update.participants) {
-                    const user = participant.split('@')[0]
-                    const welcomeMsg = `🎁 *WELCOME TO ${groupName.toUpperCase()}* 🎁\n\nHey @${user}, you're finally here! \n\nRead the description, be cool and enjoy ❤️\n\n- COSSY REIGN BOT`
+            for (const participant of participants) {
+                const ppUrl = await sock.profilePictureUrl(participant, 'image').catch(() => 'https://i.imgur.com/2DZr4Lv.png');
 
-                    await sock.sendMessage(update.id, {
-                        image: { url: 'https://i.ibb.co/V3LkR5k/welcome-gift.png' },
-                        caption: welcomeMsg,
+                if (action === 'add') {
+                    // WELCOME
+                    await sock.sendMessage(id, {
+                        text: `👋 Welcome @${participant.split('@')[0]} to *${groupName}*!\n\nPlease read group rules and have fun 🎉`,
                         mentions: [participant]
-                    })
+                    });
+                } else if (action === 'remove') {
+                    // GOODBYE
+                    await sock.sendMessage(id, {
+                        text: `👋 Goodbye @${participant.split('@')[0]}\nWe will miss you from *${groupName}*`,
+                        mentions: [participant]
+                    });
                 }
             }
-
-            // GOODBYE
-            if(update.action === 'remove' || update.action === 'leave') {
-                for(const participant of update.participants) {
-                    const user = participant.split('@')[0]
-                    const byeMsg = `👋 *@${user} left ${groupName}*\n\nThanks for being part of us. Come back anytime ❤️\n\n- COSSY REIGN BOT`
-
-                    await sock.sendMessage(update.id, {
-                        image: { url: 'https://i.ibb.co/0XJ1p4v/goodbye.png' },
-                        caption: byeMsg,
-                        mentions: [participant]
-                    })
-                }
-            }
-        } catch(e) {
-            console.log(chalk.red('Welcome/Goodbye Error:', e))
+        } catch (e) {
+            console.log(e);
         }
-    })
-    // ===== AUTO WELCOME + GOODBYE END =====
+    });
 
-    // ===== AUTO RECONNECT FOR 24/7 =====
-    sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect } = update
-        if(connection === 'open') {
-            console.log(chalk.green.bold('✅ COSSY REIGN CONNECTED!'))
+    // ========== STATUS VIEW ==========
+    sock.ev.on('messages.upsert', async ({ messages }) => {
+        const m = messages[0];
+        if (!m.message) return;
+
+        const from = m.key.remoteJid;
+        const isStatus = from === 'status@broadcast';
+
+        // AUTO VIEW STATUS
+        if (isStatus) {
+            await sock.readMessages([m.key]);
+            console.log('👀 Viewed status from:', m.key.participant);
+            return;
         }
-        if(connection === 'close') {
-            const statusCode = lastDisconnect.error?.output?.statusCode
-            const shouldReconnect = statusCode !== DisconnectReason.loggedOut
-            console.log(chalk.yellow(`Connection closed. Reason: ${statusCode}. Reconnecting...`))
-            if(shouldReconnect) {
-                startCossy() // restart bot
-            } else {
-                console.log(chalk.red('Logged out. Please scan QR again'))
-            }
+
+        // YOUR OTHER COMMANDS GO HERE
+        const text = m.message.conversation || m.message.extendedTextMessage?.text;
+        if (!text || m.key.fromMe) return;
+
+        // EXAMPLE COMMAND
+        if (text.toLowerCase() === '.ping') {
+            await sock.sendMessage(from, { text: 'pong 🏓' }, { quoted: m });
         }
-    })
-    // ===== END RECONNECT =====
+    });
 }
 
-startCossy() 
+startBot ();
