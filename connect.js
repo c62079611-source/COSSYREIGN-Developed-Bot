@@ -1,12 +1,14 @@
-const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion, jidNormalizedUser } = require('@whiskeysockets/baileys');
-const { Boom } = require('@hapi/boom');
+const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const fs = require('fs');
+const path = require('path');
 const readline = require('readline');
 
 const SESSION_DIR = './sessions';
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const question = (text) => new Promise((resolve) => rl.question(text, resolve));
+
+const prefix = '.'
 
 async function startBot() {
     if (!fs.existsSync(SESSION_DIR)) fs.mkdirSync(SESSION_DIR);
@@ -18,7 +20,6 @@ async function startBot() {
 
     if (!state.creds.registered) {
         const choice = await question('\n🔰 COSSY REIGN LOGIN\n[1] QR Code\n[2] Pairing Code/Numericals\nChoose 1 or 2: ');
-
         if (choice.trim() === '2') {
             usePairingCode = true;
             userPhone = await question('Enter your WhatsApp number with country code e.g +2547xxxxxxx: ');
@@ -43,9 +44,24 @@ async function startBot() {
         setTimeout(async () => {
             const code = await sock.requestPairingCode(userPhone.replace(/[^0-9]/g, ''));
             console.log(`\n🔢 YOUR PAIRING CODE: ${code}`);
-            console.log('Go to WhatsApp > Settings > Linked Devices > Link with phone number\n');
         }, 3000);
     }
+
+    // ========== FULL COMPATIBILITY: AUTO COMMAND LOADER ==========
+    sock.commands = new Map()
+    const commandsPath = path.join(__dirname, 'commands');
+    if (fs.existsSync(commandsPath)) {
+        const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'))
+        for (const file of commandFiles) {
+            const filePath = path.join(commandsPath, file);
+            const command = require(filePath)
+            if ('name' in command && 'execute' in command) {
+                sock.commands.set(command.name, command)
+                console.log(`✅ Loaded command: ${command.name}`)
+            }
+        }
+    }
+    // ========== END COMPATIBILITY ==========
 
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect } = update;
@@ -56,64 +72,57 @@ async function startBot() {
             if (shouldReconnect) startBot();
             else rl.close();
         } else if (connection === 'open') {
-            console.log('✅ COSSY REIGN BOT IS ONLINE');
+            console.log('✅ COSSY REIGN BOT IS ONLINE & COMPATIBLE');
             rl.close();
         }
     });
 
-    // ========== GROUP WELCOME + GOODBYE ==========
+    // ========== GROUP WELCOME + GOODBYE - UNTOUCHED ==========
     sock.ev.on('group-participants.update', async (update) => {
         const { id, participants, action } = update;
         try {
             const metadata = await sock.groupMetadata(id);
             const groupName = metadata.subject;
-
             for (const participant of participants) {
-                const ppUrl = await sock.profilePictureUrl(participant, 'image').catch(() => 'https://i.imgur.com/2DZr4Lv.png');
-
                 if (action === 'add') {
-                    // WELCOME
-                    await sock.sendMessage(id, {
-                        text: `👋 Welcome @${participant.split('@')[0]} to *${groupName}*!\n\nPlease read group rules and have fun 🎉`,
-                        mentions: [participant]
-                    });
+                    await sock.sendMessage(id, { text: `👋 Welcome @${participant.split('@')[0]} to *${groupName}*!\n\nPlease read group rules and have fun 🎉`, mentions: [participant] });
                 } else if (action === 'remove') {
-                    // GOODBYE
-                    await sock.sendMessage(id, {
-                        text: `👋 Goodbye @${participant.split('@')[0]}\nWe will miss you from *${groupName}*`,
-                        mentions: [participant]
-                    });
+                    await sock.sendMessage(id, { text: `👋 Goodbye @${participant.split('@')[0]}\nWe will miss you from *${groupName}*`, mentions: [participant] });
                 }
             }
-        } catch (e) {
-            console.log(e);
-        }
+        } catch (e) { console.log(e); }
     });
 
-    // ========== STATUS VIEW ==========
+    // ========== STATUS + UNIVERSAL COMMAND HANDLER ==========
     sock.ev.on('messages.upsert', async ({ messages }) => {
         const m = messages[0];
         if (!m.message) return;
-
         const from = m.key.remoteJid;
-        const isStatus = from === 'status@broadcast';
+        const sender = m.key.participant || m.key.remoteJid;
 
-        // AUTO VIEW STATUS
-        if (isStatus) {
+        if (from === 'status@broadcast') {
             await sock.readMessages([m.key]);
-            console.log('👀 Viewed status from:', m.key.participant);
             return;
         }
 
-        // YOUR OTHER COMMANDS GO HERE
         const text = m.message.conversation || m.message.extendedTextMessage?.text;
         if (!text || m.key.fromMe) return;
 
-        // EXAMPLE COMMAND
-        if (text.toLowerCase() === '.ping') {
-            await sock.sendMessage(from, { text: 'pong 🏓' }, { quoted: m });
+        // THIS MAKES ALL COMMANDS WORK AUTOMATICALLY
+        if (text.startsWith(prefix)) {
+            const args = text.slice(prefix.length).trim().split(/ +/)
+            const commandName = args.shift().toLowerCase()
+            const command = sock.commands.get(commandName)
+            if (command) {
+                try {
+                    await command.execute(sock, m, args)
+                } catch (error) {
+                    console.log(error)
+                    await sock.sendMessage(from, { text: `❌ Error: ${error.message}` }, { quoted: m })
+                }
+            }
         }
     });
 }
 
-startBot ();
+startBot (); 
