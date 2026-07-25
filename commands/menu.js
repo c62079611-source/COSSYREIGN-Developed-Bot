@@ -1,31 +1,36 @@
 module.exports = {
     name: 'menu',
-    command: ['menu', 'help'],
+    aliases: ['menu', 'help'], // so both .menu and .help work
     description: 'Show bot menu',
-    execute: async (sock, msg, args, isOwner) => {
+    execute: async (sock, msg, args) => {
         const from = msg.key.remoteJid
-        const owners = process.env.OWNER.split(',')
+
+        // HARD CODED FOR YOU - NO ENV NEEDED
+        const owners = ['254118868586'] // YOUR NUMBER
+        const prefix = '.'
+        const mode = 'Public'
+
         let menu = `👑 *COSSY REIGN V7.0* 👑\n\n`
-        menu += `*Owner:* ${owners.join(', ')}\n`
-        menu += `*Prefix:* ${process.env.PREFIX}\n`
-        menu += `*Mode:* ${process.env.MODE}\n\n`
+        menu += `*Owner:* +${owners.join(', +')}\n`
+        menu += `*Prefix:* ${prefix}\n`
+        menu += `*Mode:* ${mode}\n\n`
         menu += `*CORE COMMANDS:*\n`
-        menu += `.ping - Check bot speed\n`
-        menu += `.restart - Restart bot\n`
-        menu += `.menu - Show this menu\n`
-        menu += `.sticker - Reply image to make sticker\n`
-        menu += `.toimg - Reply sticker to image\n`
-        menu += `.ai <text> - Chat with AI\n`
-        menu += `.play <song> - Download music\n`
-        menu += `.tiktok <link> - Download tiktok\n`
-        menu += `.ytmp4 <link> - Download youtube\n`
-        menu += `.kick @user - Kick member\n`
-        menu += `.promote @user - Promote admin\n`
+        menu += `${prefix}ping - Check bot speed\n`
+        menu += `${prefix}restart - Restart bot\n`
+        menu += `${prefix}menu - Show this menu\n`
+        menu += `${prefix}sticker - Reply image to make sticker\n`
+        menu += `${prefix}toimg - Reply sticker to image\n`
+        menu += `${prefix}ai <text> - Chat with AI\n`
+        menu += `${prefix}play <song> - Download music\n`
+        menu += `${prefix}tiktok <link> - Download tiktok\n`
+        menu += `${prefix}ytmp4 <link> - Download youtube\n`
+        menu += `${prefix}kick @user - Kick member\n`
+        menu += `${prefix}promote @user - Promote admin\n`
         menu += `_More commands coming..._`
-        
+
         await sock.sendMessage(from, { 
             image: { url: 'https://ibb.co/twnsPqd2' },
             caption: menu 
-        })
+        }, { quoted: msg })
     }
-                             } 
+            } 
