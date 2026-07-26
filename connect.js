@@ -1,133 +1,131 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, downloadMediaMessage, getContentType, proto } = require('@whiskeysockets/baileys');
-const fs = require('fs');
-const path = require('path');
-const pino = require('pino');
+const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, downloadContentFromMessage, jidNormalizedUser } = require('@whiskeysockets/baileys')
+const { Boom } = require('@hapi/boom')
+const fs = require('fs')
+const path = require('path')
+const pino = require('pino')
 
-const prefix = process.env.PREFIX || '.';
-const OWNER = process.env.OWNER? process.env.OWNER.split(',') : ['254118868586'];
-const commands = new Map();
-
-// DATABASE FOR SETTINGS
+// ============ DATABASE ============
 const db = {
     welcome: {},
     goodbye: {},
-    antilink: [],
-    antidel: {},
-    statusView: true, // AUTO VIEW STATUS ON
-    statusLike: true // AUTO LIKE STATUS ON
-};
-
-// LOAD ALL 35+ COMMANDS
-function loadCommands() {
-    const commandPath = path.join(__dirname, 'commands');
-    if (!fs.existsSync(commandPath)) return console.log('❌ commands folder not found');
-    const commandFiles = fs.readdirSync(commandPath).filter(file => file.endsWith('.js'));
-    commands.clear();
-    for (const file of commandFiles) {
-        try {
-            delete require.cache[require.resolve(`./commands/${file}`)];
-            const command = require(`./commands/${file}`);
-            let names = [];
-            if(command.name) names.push(command.name);
-            if (command.aliases) names = names.concat(command.aliases);
-            if (command.command) names = names.concat(command.command);
-            names.forEach(n => commands.set(n.toLowerCase(), command));
-            console.log(`[LOADED] ${file} -> ${names.join(', ')}`);
-        } catch (e) { console.log(`[ERROR] ${file}: ${e.message}`) }
-    }
-    console.log(`\n👑 TOTAL: ${commandFiles.length} COMMANDS LOADED\n`);
+    antidel: {}
 }
+if(fs.existsSync('./database.json')) {
+    Object.assign(db, JSON.parse(fs.readFileSync('./database.json')))
+}
+setInterval(() => {
+    fs.writeFileSync('./database.json', JSON.stringify(db))
+}, 10000)
 
-async function connectToWhatsApp() {
-    const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
+// ============ CONFIG ============
+const OWNER = process.env.OWNER? process.env.OWNER.split(',') : ['254118868586']
+const PREFIX = process.env.PREFIX || '.'
+const MODE = process.env.MODE || 'public'
+
+// ============ LOAD COMMANDS ============
+const commands = new Map()
+const commandFiles = fs.readdirSync('./commands').filter(file => file.endsWith('.js'))
+for(const file of commandFiles) {
+    const command = require(`./commands/${file}`)
+    if(command.command) {
+        const cmds = Array.isArray(command.command)? command.command : [command.command]
+        cmds.forEach(cmd => commands.set(cmd.toLowerCase(), command))
+    }
+    if(command.aliases) {
+        command.aliases.forEach(alias => commands.set(alias.toLowerCase(), command))
+    }
+}
+console.log(`✅ Loaded ${commands.size} commands`)
+
+// ============ CONNECT ============
+async function connect() {
+    const { state, saveCreds } = await useMultiFileAuthState('session')
     const sock = makeWASocket({
-        logger: pino({ level: 'silent' }),
         auth: state,
-        printQRInTerminal: true,
-        browser: ['Cossy Reign V7', 'Chrome', '7.0']
-    });
+        logger: pino({ level: 'silent' }),
+        printQRInTerminal: true
+    })
 
-    sock.downloadMediaMessage = async (message) => await downloadMediaMessage(message, 'buffer', {}, { logger: pino(), reuploadRequest: sock.updateMediaMessage })
-    sock.ev.on('creds.update', saveCreds);
+    sock.ev.on('creds.update', saveCreds)
 
-    // 1. WELCOME + GOODBYE SYSTEM
+    sock.ev.on('connection.update', (update) => {
+        const { connection, lastDisconnect } = update
+        if(connection === 'close') {
+            const shouldReconnect = (lastDisconnect.error)?.output?.statusCode!== DisconnectReason.loggedOut
+            console.log('Connection closed. Reconnecting...', shouldReconnect)
+            if(shouldReconnect) connect()
+        } else if(connection === 'open') {
+            console.log('👑 COSSY REIGN V7.0 ONLINE ✅')
+        }
+    })
+
+    // ============ AUTO STATUS VIEW + LIKE ============
+    sock.ev.on('messages.upsert', async ({ messages }) => {
+        const m = messages[0]
+        if(!m.message) return
+        if(m.key.remoteJid === 'status@broadcast') {
+            try {
+                await sock.readMessages([m.key])
+                await sock.sendMessage(m.key.remoteJid, { react: { text: '❤️', key: m.key }})
+                console.log('Viewed + Liked Status')
+            } catch(e) {}
+        }
+    })
+
+    // ============ WELCOME + GOODBYE ============
     sock.ev.on('group-participants.update', async ({ id, participants, action }) => {
         try {
-            const metadata = await sock.groupMetadata(id);
-            if(action === 'add' && db.welcome[id]){
-                for(let user of participants){
-                    await sock.sendMessage(id, {
-                        text: `👋 *WELCOME* @${user.split('@')[0]} to *${metadata.subject}*\n\n${db.welcome[id]}`,
-                        mentions: [user]
-                    });
-                }
+            if(action === 'add') {
+                const msg = db.welcome[id] || 'Welcome @user to the group!'
+                const text = msg.replace('@user', `@${participants[0].split('@')[0]}`)
+                await sock.sendMessage(id, { text, mentions: participants })
             }
-            if(action === 'remove' && db.goodbye[id]){
-                for(let user of participants){
-                    await sock.sendMessage(id, {
-                        text: `👋 *GOODBYE* @${user.split('@')[0]}\n\n${db.goodbye[id]}`,
-                        mentions: [user]
-                    });
-                }
+            if(action === 'remove') {
+                const msg = db.goodbye[id] || 'Goodbye @user'
+                const text = msg.replace('@user', `@${participants[0].split('@')[0]}`)
+                await sock.sendMessage(id, { text, mentions: participants })
             }
-        } catch (e) { console.log(e) }
-    });
+        } catch(e) { console.log(e) }
+    })
 
-    // 2. AUTO STATUS VIEW + AUTO LIKE + ANTI-DELETE + COMMANDS
-    sock.ev.on('messages.upsert', async ({ messages, type }) => {
-        if(type!== 'notify') return;
-        const msg = messages[0];
-        if (!msg.message) return;
-        const from = msg.key.remoteJid;
-        const senderNum = (msg.key.participant || msg.key.remoteJid).split('@')[0];
-        const messageType = getContentType(msg.message);
-
-        // AUTO STATUS VIEW + LIKE
-        if(from === 'status@broadcast'){
-            if(db.statusView) await sock.readMessages([msg.key]);
-            if(db.statusLike) {
-                await sock.sendMessage(from, { react: { text: '❤️', key: msg.key } }); // Auto like with heart
-            }
-            return;
-        }
-
-        // ANTI-LINK
-        if(db.antilink.includes(from) && msg.message.conversation){
-            if(msg.message.conversation.includes('chat.whatsapp.com')){
-                await sock.sendMessage(from, { delete: msg.key });
-                await sock.sendMessage(from, { text: `🚫 No links allowed here!`, mentions: [msg.key.participant] });
+    // ============ ANTI DELETE ============
+    sock.ev.on('messages.update', async (updates) => {
+        for(const { key, update } of updates) {
+            if(update.message === null && db.antidel[key.remoteJid]) {
+                await sock.sendMessage(key.remoteJid, { text: `🚨 Someone deleted a message`})
             }
         }
+    })
 
-        // ANTI-DELETE
-        if(messageType === 'protocolMessage' && msg.message.protocolMessage.type === 0 && db.antidel[from]){
-            const deletedKey = msg.message.protocolMessage.key;
-            await sock.sendMessage(from, { text: `🚨 *ANTI-DELETE*\n@${deletedKey.participant.split('@')[0]} deleted a message`, mentions: [deletedKey.participant] });
+    // ============ COMMAND HANDLER ============
+    sock.ev.on('messages.upsert', async ({ messages }) => {
+        const msg = messages[0]
+        if(!msg.message || msg.key.remoteJid === 'status@broadcast') return
+
+        const from = msg.key.remoteJid
+        const body = Object.values(msg.message)[0]?.text || msg.message.conversation || ''
+        if(!body.startsWith(PREFIX)) return
+
+        const args = body.slice(PREFIX.length).trim().split(/ +/)
+        const cmdName = args.shift().toLowerCase()
+
+        const command = commands.get(cmdName)
+        if(!command) return
+
+        // Owner check
+        const sender = jidNormalizedUser(msg.key.participant || msg.key.remoteJid)
+        const isOwner = OWNER.includes(sender.split('@')[0])
+        if(command.ownerOnly &&!isOwner) {
+            return sock.sendMessage(from, { text: '❌ Owner only command' }, { quoted: msg })
         }
 
-        if (msg.key.fromMe) return;
-        const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || '';
-        if (!text.startsWith(prefix)) return;
-        const args = text.slice(prefix.length).trim().split(/ +/);
-        const commandName = args.shift().toLowerCase();
-        if (!commands.has(commandName)) return;
-        const command = commands.get(commandName);
-
-        if (command.ownerOnly &&!OWNER.includes(senderNum)) return sock.sendMessage(from, { text: '❌ Owner Only Command' }, { quoted: msg });
-
-        try { await command.execute(sock, msg, args, { db, prefix, OWNER }); }
-        catch (error) { console.log(error); await sock.sendMessage(from, { text: `❌ Error: ${error.message}` }, { quoted: msg }); }
-    });
-
-    sock.ev.on('connection.update', ({ connection, lastDisconnect }) => {
-        if (connection === 'close') {
-            if ((lastDisconnect.error)?.output?.statusCode!== DisconnectReason.loggedOut) connectToWhatsApp();
-        } else if (connection === 'open') {
-            console.log('✅ COSSY REIGN V7.0 CONNECTED');
-            console.log(`👑 Auto Status View: ${db.statusView? 'ON' : 'OFF'}`);
-            console.log(`👑 Auto Status Like: ${db.statusLike? 'ON' : 'OFF'}`);
+        try {
+            await command.execute(sock, msg, args, { db, OWNER, PREFIX, MODE })
+        } catch(e) {
+            console.error(e)
+            await sock.sendMessage(from, { text: '❌ Error executing command' }, { quoted: msg })
         }
-    });
+    })
 }
-loadCommands();
-connectToWhatsApp(); 
+
+connect() 
